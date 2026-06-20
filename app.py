@@ -34,6 +34,11 @@ SIGNAL_LOG_PATH = os.path.join(SIGNAL_LOG_DIR, "signal_run_log.csv")
 POSITION_STATE_PATH = os.path.join(SIGNAL_LOG_DIR, "position_state.csv")
 POST_TRADE_NOTES_PATH = os.path.join(SIGNAL_LOG_DIR, "post_trade_notes.csv")
 LAST_GOOD_CACHE_DIR = os.path.join(SIGNAL_LOG_DIR, "cache")
+PUBLIC_DATA_DIR = "public_data"
+PUBLIC_PRICE_DIR = os.path.join(PUBLIC_DATA_DIR, "price")
+PRICE_SOURCE_IFIND = "iFinD"
+PRICE_SOURCE_AKSHARE = "AKShare"
+PRICE_SOURCE_STATIC = "Static Snapshot"
 DAILY_WEATHER_FIELDS = [
     "temperature_2m_max",
     "temperature_2m_min",
@@ -614,6 +619,44 @@ def secret_env_value(*keys: str) -> str:
         if value:
             return value.strip()
     return ""
+
+def has_ifind_credentials(refresh_token: str, username: str, password: str) -> bool:
+    return bool(refresh_token or (username and password))
+
+
+def is_streamlit_cloud_runtime() -> bool:
+    markers = (
+        "STREAMLIT_SHARING_MODE",
+        "STREAMLIT_CLOUD",
+        "STREAMLIT_RUNTIME_ENV",
+    )
+    return any(bool(os.getenv(key)) for key in markers)
+
+
+def public_price_paths(commodity_name: str) -> tuple[str, str]:
+    slug = cache_key_slug(commodity_name)
+    return os.path.join(PUBLIC_PRICE_DIR, f"{slug}.csv"), os.path.join(PUBLIC_PRICE_DIR, f"{slug}.json")
+
+
+def public_price_snapshot_exists() -> bool:
+    return all(os.path.exists(public_price_paths(name)[0]) for name in COMMODITIES)
+
+
+def resolve_price_source(refresh_token: str, username: str, password: str) -> str:
+    requested = secret_env_value("APP_PRICE_SOURCE", "PRICE_SOURCE", "MARKET_DATA_MODE").strip().lower()
+    if requested in {"static", "snapshot", "public", "public_snapshot"}:
+        return PRICE_SOURCE_STATIC
+    if requested in {"akshare", "sina"}:
+        return PRICE_SOURCE_AKSHARE
+    if requested in {"ifind", "live"} and has_ifind_credentials(refresh_token, username, password):
+        return PRICE_SOURCE_IFIND
+    if is_streamlit_cloud_runtime() and public_price_snapshot_exists():
+        return PRICE_SOURCE_STATIC
+    if has_ifind_credentials(refresh_token, username, password):
+        return PRICE_SOURCE_IFIND
+    if public_price_snapshot_exists():
+        return PRICE_SOURCE_STATIC
+    return PRICE_SOURCE_AKSHARE
 
 
 def parse_open_meteo_daily(payload: dict[str, Any]) -> pd.DataFrame:
@@ -4385,6 +4428,8 @@ def save_price_cache(
         "contract_selector": frame.attrs.get("contract_selector", {}),
     }
     save_last_good_frame("price", price_cache_key(commodity_name, price_source, symbol, lookback_months), frame, metadata)
+    if price_source in {PRICE_SOURCE_IFIND, PRICE_SOURCE_AKSHARE}:
+        save_public_price_snapshot(commodity_name, symbol, frame)
 
 
 def load_price_cache(
@@ -4408,6 +4453,56 @@ def load_price_cache(
     mark_frame_cache_source(frame, "cache", message)
     return frame, message
 
+
+def save_public_price_snapshot(commodity_name: str, symbol: str, frame: pd.DataFrame) -> None:
+    if frame is None or frame.empty:
+        return
+    csv_path, meta_path = public_price_paths(commodity_name)
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    frame.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    metadata = {
+        "commodity": commodity_name,
+        "symbol": symbol,
+        "price_symbol": frame.attrs.get("price_symbol", symbol),
+        "contract_selector": frame.attrs.get("contract_selector", {}),
+        "saved_at": dt.datetime.now(APP_TZ).isoformat(timespec="seconds"),
+        "rows": int(len(frame)),
+        "latest_date": log_scalar(latest_price_date_from_frame(frame)),
+        "source": frame.attrs.get("data_source_status", "live"),
+    }
+    with open(meta_path, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, ensure_ascii=False, indent=2, default=str)
+
+
+def load_public_price_snapshot(commodity_name: str, symbol: str) -> tuple[pd.DataFrame, str | None]:
+    csv_path, meta_path = public_price_paths(commodity_name)
+    if not os.path.exists(csv_path):
+        return pd.DataFrame(), None
+    try:
+        frame = pd.read_csv(csv_path, keep_default_na=False)
+        frame = normalize_price_frame(frame)
+        if frame.empty:
+            return pd.DataFrame(), None
+        meta: dict[str, Any] = {}
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as handle:
+                meta = json.load(handle)
+        price_symbol = str(meta.get("price_symbol") or symbol)
+        attach_price_metadata(frame, price_symbol)
+        if isinstance(meta.get("contract_selector"), dict):
+            frame.attrs["contract_selector"] = meta.get("contract_selector", {})
+        saved_at = parse_cache_saved_at(meta.get("saved_at"))
+        stale_days = (today_china() - saved_at.date()).days if saved_at else None
+        frame.attrs["public_snapshot"] = True
+        frame.attrs["cache_saved_at"] = meta.get("saved_at", "")
+        frame.attrs["cache_stale_days"] = stale_days
+        latest_date = meta.get("latest_date") or log_scalar(latest_price_date_from_frame(frame))
+        stale_text = "n/a" if stale_days is None else f"{stale_days}d"
+        message = f"{commodity_name} uses public static price snapshot; latest bar {latest_date}; saved {meta.get('saved_at', 'unknown')}; stale {stale_text}."
+        mark_frame_cache_source(frame, "static", message)
+        return frame, message
+    except Exception as exc:
+        return pd.DataFrame(), f"{commodity_name} static price snapshot failed: {exc}"
 def get_price_data(
     commodity_name: str,
     commodity: dict[str, Any],
@@ -4428,7 +4523,13 @@ def get_price_data(
             return frame, cache_message
         return pd.DataFrame(), error_message
 
-    if price_source == "AKShare":
+    if price_source == PRICE_SOURCE_STATIC:
+        frame, static_message = load_public_price_snapshot(commodity_name, requested_symbol)
+        if not frame.empty:
+            return frame, static_message
+        return fallback(static_message or f"{commodity_name} static price snapshot is unavailable")
+
+    if price_source == PRICE_SOURCE_AKSHARE:
         requested_symbol = commodity["symbol"]
         try:
             raw = fetch_price_history(
@@ -4445,7 +4546,7 @@ def get_price_data(
             return frame, None
         except Exception as exc:
             return fallback(f"{commodity_name} AKShare 取数失败: {exc}")
-    if price_source == "iFinD":
+    if price_source == PRICE_SOURCE_IFIND:
         code = requested_symbol or commodity["ifind_symbol"]
         requested_symbol = code
         start_str = start.strftime("%Y-%m-%d")
@@ -5011,17 +5112,12 @@ def render_regime_stress_test_panel(
         st.error("压力测试存在强制动作：" + " / ".join(severe["品种"].astype(str).unique()))
     else:
         st.info("当前压力情景未触发强制退出；仍需按盘中价格和保证金实时复核。")
-    st.dataframe(
-        stress.style.format(
-            {
-                "账户损失": "{:.2%}",
-                "保证金占账户": "{:.2%}",
-            },
-            na_rep="n/a",
-        ),
-        hide_index=True,
-        width="stretch",
-    )
+    stress_display = stress.copy()
+    for column in ["\u8d26\u6237\u635f\u5931", "\u4fdd\u8bc1\u91d1\u5360\u8d26\u6237"]:
+        if column in stress_display.columns:
+            numeric = pd.to_numeric(stress_display[column], errors="coerce")
+            stress_display[column] = numeric.map(lambda value: "n/a" if pd.isna(value) else f"{value:.2%}")
+    st.dataframe(stress_display, hide_index=True, width="stretch")
     st.download_button(
         "下载压力测试 CSV",
         stress.to_csv(index=False).encode("utf-8-sig"),
@@ -5530,31 +5626,13 @@ def main() -> None:
             "correlation_lookback": int(correlation_lookback),
         }
         position_states = render_position_state_editor(selected, position_states, anchor)
-        price_source = st.selectbox(
-            "行情数据源",
-            options=["AKShare", "iFinD"],
-            index=1,
-        )
         ifind_symbol = ifind_default_symbol
-        if price_source == "iFinD":
-            ifind_symbol = st.text_input("iFinD 合约代码", value=ifind_default_symbol)
-            ifind_refresh_token = st.text_input(
-                "iFinD Refresh Token（HTTP）",
-                value=ifind_default_refresh_token,
-                type="password",
-                help="有 refresh_token 时优先用 HTTP 取数；未填写会尝试账号登录。",
-            )
-            ifind_username = st.text_input("iFinD 账号", value=ifind_default_username)
-            ifind_password = st.text_input(
-                "iFinD 密码",
-                value=ifind_default_password,
-                type="password",
-            )
-        else:
-            ifind_refresh_token = ""
-            ifind_username = ""
-            ifind_password = ""
-            ifind_symbol = ifind_default_symbol
+        ifind_refresh_token = ifind_default_refresh_token
+        ifind_username = ifind_default_username
+        ifind_password = ifind_default_password
+        price_source = resolve_price_source(ifind_refresh_token, ifind_username, ifind_password)
+        credential_status = "loaded" if has_ifind_credentials(ifind_refresh_token, ifind_username, ifind_password) else "not configured"
+        st.caption(f"Market data mode: {price_source}; iFinD credentials: {credential_status}. Inputs are hidden from the UI.")
 
         settings = RuleSettings(
             forecast_days=forecast_days,
@@ -5576,9 +5654,9 @@ def main() -> None:
 
         for loop_name, loop_commodity in COMMODITIES.items():
             loop_ifind_symbol = loop_commodity.get("ifind_symbol", loop_commodity["symbol"])
-            if price_source == "iFinD" and loop_name == selected:
+            if price_source == PRICE_SOURCE_IFIND and loop_name == selected:
                 loop_ifind_symbol = ifind_symbol
-            price_symbols[loop_name] = loop_ifind_symbol if price_source == "iFinD" else loop_commodity["symbol"]
+            price_symbols[loop_name] = loop_ifind_symbol if price_source in {PRICE_SOURCE_IFIND, PRICE_SOURCE_STATIC} else loop_commodity["symbol"]
             frame, error = get_price_data(
                 loop_name,
                 loop_commodity,
@@ -5608,11 +5686,11 @@ def main() -> None:
             for error in price_errors:
                 st.write(error)
 
-    with st.expander("手动行情 CSV", expanded=price_source != "AKShare" or bool(price_errors)):
+    with st.expander("手动行情 CSV", expanded=price_source != PRICE_SOURCE_AKSHARE or bool(price_errors)):
         manual = load_manual_csv(selected, key=f"manual-{selected}")
         if manual is not None:
             manual_frame = normalize_price_frame(manual)
-            attach_price_metadata(manual_frame, price_symbols.get(selected, ifind_symbol if price_source == "iFinD" else commodity["symbol"]))
+            attach_price_metadata(manual_frame, price_symbols.get(selected, ifind_symbol if price_source in {PRICE_SOURCE_IFIND, PRICE_SOURCE_STATIC} else commodity["symbol"]))
             price_frames[selected] = manual_frame
             price_symbols[selected] = manual_frame.attrs.get("price_symbol", price_symbols.get(selected, ""))
 

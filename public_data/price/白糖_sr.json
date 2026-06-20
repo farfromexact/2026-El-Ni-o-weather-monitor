@@ -1,0 +1,64 @@
+{
+  "commodity": "白糖 SR",
+  "symbol": "SRZL.CZC",
+  "price_symbol": "SR609.CZC",
+  "contract_selector": {
+    "mode": "active_contract_fallback",
+    "base_symbol": "SRZL.CZC",
+    "selected_symbol": "SR609.CZC",
+    "trigger": "continuous contract open-interest unavailable",
+    "candidates": [
+      {
+        "symbol": "SR609.CZC",
+        "status": "不可用",
+        "score": 20,
+        "volume": "360,257",
+        "open_interest": "n/a",
+        "roll": "2026-09 / 73d",
+        "note": "最新持仓量缺失或为 0 | 近 60 日持仓量覆盖不足"
+      },
+      {
+        "symbol": "SR701.CZC",
+        "status": "不可用",
+        "score": 20,
+        "volume": "79,804",
+        "open_interest": "n/a",
+        "roll": "2027-01 / 195d",
+        "note": "最新持仓量缺失或为 0 | 近 60 日持仓量覆盖不足"
+      },
+      {
+        "symbol": "SR705.CZC",
+        "status": "不可用",
+        "score": 20,
+        "volume": "3,283",
+        "open_interest": "n/a",
+        "roll": "2027-05 / 315d",
+        "note": "最新持仓量缺失或为 0 | 近 60 日持仓量覆盖不足"
+      },
+      {
+        "symbol": "SR709.CZC",
+        "status": "error",
+        "score": "",
+        "volume": "",
+        "open_interest": "",
+        "roll": "",
+        "note": "empty frame"
+      },
+      {
+        "symbol": "SR801.CZC",
+        "status": "error",
+        "score": "",
+        "volume": "",
+        "open_interest": "",
+        "roll": "",
+        "note": "empty frame"
+      }
+    ],
+    "selected_reason": "selected by volume 360,257; OI unavailable",
+    "selection_basis": "volume_only"
+  },
+  "saved_at": "2026-06-20T11:46:24+08:00",
+  "rows": 60,
+  "latest_date": "2026-06-18",
+  "source": "cache"
+}

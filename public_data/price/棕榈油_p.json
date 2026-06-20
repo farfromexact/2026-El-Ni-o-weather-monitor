@@ -1,0 +1,64 @@
+{
+  "commodity": "棕榈油 P",
+  "symbol": "PZL.DCE",
+  "price_symbol": "P2609.DCE",
+  "contract_selector": {
+    "mode": "active_contract_fallback",
+    "base_symbol": "PZL.DCE",
+    "selected_symbol": "P2609.DCE",
+    "trigger": "continuous contract open-interest unavailable",
+    "candidates": [
+      {
+        "symbol": "P2609.DCE",
+        "status": "不可用",
+        "score": 20,
+        "volume": "615,514",
+        "open_interest": "n/a",
+        "roll": "2026-09 / 73d",
+        "note": "最新持仓量缺失或为 0 | 近 60 日持仓量覆盖不足"
+      },
+      {
+        "symbol": "P2701.DCE",
+        "status": "不可用",
+        "score": 20,
+        "volume": "116,894",
+        "open_interest": "n/a",
+        "roll": "2027-01 / 195d",
+        "note": "最新持仓量缺失或为 0 | 近 60 日持仓量覆盖不足"
+      },
+      {
+        "symbol": "P2705.DCE",
+        "status": "不可用",
+        "score": 20,
+        "volume": "3,998",
+        "open_interest": "n/a",
+        "roll": "2027-05 / 315d",
+        "note": "最新持仓量缺失或为 0 | 近 60 日持仓量覆盖不足"
+      },
+      {
+        "symbol": "P2709.DCE",
+        "status": "error",
+        "score": "",
+        "volume": "",
+        "open_interest": "",
+        "roll": "",
+        "note": "iFinD 历史行情返回错误: {'errorcode': -4210, 'errmsg': 'error happen with input parameters, please have a check.', 'tables': [], 'datatype': [], 'inputParams': {'jsonrpc': True, 'params': []}, 'dataVol': 0, 'perf': 118}"
+      },
+      {
+        "symbol": "P2801.DCE",
+        "status": "error",
+        "score": "",
+        "volume": "",
+        "open_interest": "",
+        "roll": "",
+        "note": "iFinD 历史行情返回错误: {'errorcode': -4210, 'errmsg': 'error happen with input parameters, please have a check.', 'tables': [], 'datatype': [], 'inputParams': {'jsonrpc': True, 'params': []}, 'dataVol': 0, 'perf': 47}"
+      }
+    ],
+    "selected_reason": "selected by volume 615,514; OI unavailable",
+    "selection_basis": "volume_only"
+  },
+  "saved_at": "2026-06-20T11:46:24+08:00",
+  "rows": 60,
+  "latest_date": "2026-06-18",
+  "source": "cache"
+}

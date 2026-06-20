@@ -43,3 +43,11 @@ IFIND_PASSWORD=...
 ## 风险说明
 
 这个工具是研究与交易纪律面板，不构成投资建议。期货带杠杆，必须自行设置单笔风险、止损和总仓位上限。
+## Market data mode
+
+The app hides iFinD credentials from the UI.
+
+- Local run: put iFinD credentials in `.streamlit/secrets.toml` or environment variables. The app auto-selects iFinD live data when credentials are present.
+- Cloud/public run: when credentials are absent, the app auto-selects `public_data/price` static snapshots and shows the latest saved close.
+- Refresh workflow: run the app locally after market close, let it fetch iFinD data, then commit and push the updated `public_data/price/*.csv` and `*.json` files.
+- Optional override: set `APP_PRICE_SOURCE=static`, `APP_PRICE_SOURCE=ifind`, or `APP_PRICE_SOURCE=akshare`.
